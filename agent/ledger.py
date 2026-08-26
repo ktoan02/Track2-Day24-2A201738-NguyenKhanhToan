@@ -32,13 +32,54 @@ Sinh viên phải tự tay chứng minh được: sửa 1 ký tự trong 1 dòng
 rồi gọi verify() phải trả về False.
 """
 from __future__ import annotations
-
+import hashlib
+import json
 from pathlib import Path
-
-
+def _compute_hash(entry: dict) -> str:
+    # Loại bỏ field 'hash' để tính hash cho nội dung còn lại
+    data = {k: v for k, v in entry.items() if k != "hash"}
+    canonical = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 def append(entry: dict, path: Path) -> dict:
-    raise NotImplementedError("BƯỚC 3d: implement ledger append")
-
-
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    prev_hash = "0" * 64
+    if path.exists() and path.stat().st_size > 0:
+        lines = path.read_text(encoding="utf-8").strip().splitlines()
+        if lines:
+            last_entry = json.loads(lines[-1])
+            prev_hash = last_entry.get("hash", "0" * 64)
+    record = dict(entry)
+    record["prev_hash"] = prev_hash
+    record["hash"] = _compute_hash(record)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return record
 def verify(path: Path) -> bool:
-    raise NotImplementedError("BƯỚC 3d: implement ledger verify")
+    if not path.exists():
+        return True
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    if not lines:
+        return True
+    expected_prev_hash = "0" * 64
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except Exception:
+            return False
+        # 1. Kiểm tra reason non-empty
+        reason = record.get("reason")
+        if not reason or not str(reason).strip():
+            return False
+        # 2. Kiểm tra prev_hash
+        if record.get("prev_hash") != expected_prev_hash:
+            return False
+        # 3. Kiểm tra hash integrity
+        stored_hash = record.get("hash")
+        computed_hash = _compute_hash(record)
+        if stored_hash != computed_hash:
+            return False
+        expected_prev_hash = stored_hash
+    return True
