@@ -30,10 +30,46 @@ set ở tests/vn_pii_testset.jsonl):
 """
 from __future__ import annotations
 
+import re
+
+# Regex patterns
+EMAIL_RE = re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b")
+BANK_RE = re.compile(r"(?i)(?:STK|số tài khoản|so tai khoan)\s*(\d{8,16})\b")
+PHONE_RE = re.compile(r"\b0\d{9}\b")
+CCCD_RE = re.compile(r"\b\d{12}\b")
 
 def detect(text: str) -> list[dict]:
-    raise NotImplementedError("BƯỚC 3a: implement PII detection")
-
-
+    entities: list[dict] = []
+    occupied: list[tuple[int, int]] = []
+    def _add_entity(ent_type: str, start: int, end: int):
+        # Tránh trùng lặp vị trí (overlap)
+        for s, e in occupied:
+            if max(start, s) < min(end, e):
+                return
+        entities.append({"type": ent_type, "start": start, "end": end})
+        occupied.append((start, end))
+    # 1. Detect EMAIL
+    for m in EMAIL_RE.finditer(text):
+        _add_entity("EMAIL", m.start(), m.end())
+    # 2. Detect VN_BANK_ACCOUNT (sau STK)
+    for m in BANK_RE.finditer(text):
+        start, end = m.start(1), m.end(1)
+        _add_entity("VN_BANK_ACCOUNT", start, end)
+    # 3. Detect VN_PHONE
+    for m in PHONE_RE.finditer(text):
+        _add_entity("VN_PHONE", m.start(), m.end())
+    # 4. Detect VN_CCCD (12 chữ số)
+    for m in CCCD_RE.finditer(text):
+        _add_entity("VN_CCCD", m.start(), m.end())
+    # Sắp xếp theo start position
+    entities.sort(key=lambda x: x["start"])
+    return entities
 def redact(text: str) -> str:
-    raise NotImplementedError("BƯỚC 3a: implement PII redaction")
+    entities = detect(text)
+    # Thay thế từ cuối về đầu để không làm lệch offset ký tự
+    result = list(text)
+    for ent in sorted(entities, key=lambda x: x["start"], reverse=True):
+        start, end = ent["start"], ent["end"]
+        replacement = f"[REDACTED_{ent['type']}]"
+        result[start:end] = list(replacement)
+    return "".join(result)
